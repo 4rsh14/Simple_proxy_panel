@@ -19,5 +19,9 @@
     "node": ">=18"
   },
   "author": "4rsh14 (https://github.com/4rsh14)",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "javascript-obfuscator": "^5.10.0",
+    "terser": "^5.51.2"
+  }
 }
