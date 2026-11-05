@@ -18,10 +18,14 @@
   "engines": {
     "node": ">=18"
   },
-  "author": "4rsh14 (https://github.com/4rsh14)",
+  "author": "Arash Seyfi",
   "license": "MIT",
+  "contributors": [
+    "4rsh14 (https://github.com/4rsh14)"
+  ],
   "devDependencies": {
     "javascript-obfuscator": "^5.10.0",
-    "terser": "^5.51.2"
+    "terser": "^5.51.2",
+    "wrangler": "^3.0.0"
   }
 }
