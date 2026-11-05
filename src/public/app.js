@@ -173,9 +173,9 @@ function renderNodes(nodes) {
 async function loadData() {
   try {
     const segs = window.location.pathname.split('/').filter(Boolean);
-    const prefix = segs[0] || 'mavis';
+    const prefix = segs[0] || 'wp_panel';
 
-    const res = await fetch('/health');
+    const res = await fetch('/' + prefix + '/health' + window.location.search);
     const data = await res.json();
     gateData = data;
 
@@ -231,15 +231,19 @@ async function loadData() {
       }
 
       const val = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-      val('urlSubCompat', `${origin}/${prefix}/base64`);
-      val('urlSubFull', `${origin}/${prefix}/base64?compat=full`);
-      val('urlClash', `${origin}/${prefix}/clash`);
-      val('urlSb', `${origin}/${prefix}/sb/raw`);
-      val('urlWgConf', `${origin}/${prefix}/wg.conf`);
+      const qToken = new URLSearchParams(window.location.search).get('token') || new URLSearchParams(window.location.search).get('pwd') || new URLSearchParams(window.location.search).get('password');
+      const qPart = qToken ? `?token=${encodeURIComponent(qToken)}` : '';
+      const qSep = qPart ? '&' : '?';
+
+      val('urlSubCompat', `${origin}/${prefix}/base64${qPart}`);
+      val('urlSubFull', `${origin}/${prefix}/base64${qPart}${qSep}compat=full`);
+      val('urlClash', `${origin}/${prefix}/clash${qPart}`);
+      val('urlSb', `${origin}/${prefix}/sb/raw${qPart}`);
+      val('urlWgConf', `${origin}/${prefix}/wg.conf${qPart}`);
 
       const mtNode = data.nodes?.find(n => n.type === 'MTProto');
-      const mtUri = mtNode ? mtNode.uri : `${origin}/${prefix}/tg`;
-      const mtConnect = mtNode ? (mtNode.tmeUri || mtNode.uri) : `${origin}/${prefix}/tg`;
+      const mtUri = mtNode ? mtNode.uri : `${origin}/${prefix}/tg${qPart}`;
+      const mtConnect = mtNode ? (mtNode.tmeUri || mtNode.uri) : `${origin}/${prefix}/tg${qPart}`;
       val('urlMtproto', mtUri);
       const tgBtn = document.getElementById('btnConnectTg');
       if (tgBtn) tgBtn.href = mtConnect;
@@ -247,9 +251,9 @@ async function loadData() {
       if (subRowMtproto) subRowMtproto.style.display = mtNode ? '' : 'none';
 
       const wgNode = data.nodes?.find(n => n.type === 'WireGuard' || n.wgConf);
-      val('urlWgConf', `${origin}/${prefix}/wg.conf`);
+      val('urlWgConf', `${origin}/${prefix}/wg.conf${qPart}`);
       const dlBtn = document.getElementById('btnDownloadWg');
-      if (dlBtn) dlBtn.href = `${origin}/${prefix}/wg.conf`;
+      if (dlBtn) dlBtn.href = `${origin}/${prefix}/wg.conf${qPart}`;
       const subRowWg = document.getElementById('subRowWg');
       if (subRowWg) subRowWg.style.display = wgNode ? '' : 'none';
     };

@@ -3,7 +3,7 @@
  *            MAVIS PANEL — CLOUDFLARE WORKER RUNTIME
  * ====================================================================
  * High-performance Serverless VLESS over WebSocket Proxy & Web Panel
- * Developed by Arash Seyfi
+ * Developed by Arash Seyfi & 4rsh14
  * Built with Cloudflare Workers TCP Sockets (cloudflare:sockets)
  * ====================================================================
  */
@@ -21,6 +21,8 @@ const DEFAULT_CLEAN_IPS = [
   'www.csgo.com.cn'
 ];
 
+const DEFAULT_PANEL_PATH = 'wp_panel';
+const DEFAULT_REDIRECT_URL = 'https://www.youtube.com';
 const WORKER_START_TIME = Date.now();
 
 function uuidToBytes(uuidStr) {
@@ -43,6 +45,48 @@ function compareBytes(a, b) {
 
 function yamlSafeQuote(str) {
   return `"${String(str).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+function getCookie(request, name) {
+  const cookieStr = request.headers.get('Cookie') || '';
+  const cookies = cookieStr.split(';');
+  for (const c of cookies) {
+    const parts = c.trim().split('=');
+    if (parts[0] === name) return decodeURIComponent(parts.slice(1).join('=') || '');
+  }
+  return null;
+}
+
+function renderLoginHtml(panelPath, error = false) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portal Access</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #ccc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
+    .card { background: #1a1a1a; padding: 32px 28px; border-radius: 8px; border: 1px solid #282828; width: 100%; max-width: 360px; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+    h2 { font-size: 16px; font-weight: 600; margin-bottom: 20px; text-align: center; color: #eee; letter-spacing: -0.01em; }
+    input { width: 100%; padding: 10px 12px; background: #111; border: 1px solid #333; border-radius: 4px; color: #fff; font-size: 13px; margin-bottom: 16px; outline: none; }
+    input:focus { border-color: #555; }
+    button { width: 100%; padding: 10px; background: #222; border: 1px solid #3a3a3a; border-radius: 4px; color: #eee; font-size: 13px; font-weight: 600; cursor: pointer; transition: background .15s; }
+    button:hover { background: #2c2c2c; }
+    .err { color: #e57373; font-size: 12px; margin-bottom: 14px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Dashboard Authentication</h2>
+    ${error ? '<div class="err">Invalid credentials provided.</div>' : ''}
+    <form method="POST" action="/${panelPath}">
+      <input type="password" name="password" placeholder="Access Key" autofocus required autocomplete="current-password" />
+      <button type="submit">Continue</button>
+    </form>
+  </div>
+</body>
+</html>`;
 }
 
 function buildNodes(host, uuid, prefix, cleanIps, wsPath) {
@@ -376,29 +420,61 @@ export default {
         return handleVlessWebSocket(request, env);
       }
 
-      const panelPath = (env.PANEL_PATH || 'mavis').replace(/^\//, '').replace(/\/+$/, '') || 'mavis';
-      const uuid = (env.UUID || DEFAULT_UUID).trim();
-      const prefix = env.NODE_PREFIX || 'mavis-worker - ';
-      const cleanIps = env.CLEAN_IPS
-        ? env.CLEAN_IPS.split(',').map(s => s.trim()).filter(Boolean)
-        : DEFAULT_CLEAN_IPS;
+      const panelPath = (env.PANEL_PATH || DEFAULT_PANEL_PATH).replace(/^\//, '').replace(/\/+$/, '') || 'wp_panel';
+      const redirectTarget = env.REDIRECT_URL || DEFAULT_REDIRECT_URL;
+      const targetToken = (env.PANEL_TOKEN || env.PASSWORD || '').trim();
 
-      // Auth check for panel
+      // Check if path is targeting the secret panel
+      const isPanelRoot = pathname === `/${panelPath}` || pathname === `/${panelPath}/`;
+      const isPanelSub = pathname.startsWith(`/${panelPath}/`);
+
+      if (!isPanelRoot && !isPanelSub) {
+        // Any other route (including `/`, `/health`, etc.) redirects to YouTube
+        return Response.redirect(redirectTarget, 302);
+      }
+
+      // Authentication helper
       const checkAuth = () => {
-        if (!env.PANEL_TOKEN) return true;
+        if (!targetToken) return { ok: true, setCookie: false };
+
         const authHeader = request.headers.get('Authorization') || '';
         const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
-        const queryToken = url.searchParams.get('token');
-        return queryToken === env.PANEL_TOKEN || bearer === env.PANEL_TOKEN;
+        if (bearer === targetToken) return { ok: true, setCookie: false };
+
+        const queryToken = url.searchParams.get('token') || url.searchParams.get('pwd') || url.searchParams.get('password');
+        if (queryToken === targetToken) return { ok: true, setCookie: true };
+
+        const cookieToken = getCookie(request, 'wp_auth');
+        if (cookieToken === targetToken) return { ok: true, setCookie: false };
+
+        return { ok: false, setCookie: false };
       };
 
-      // Asset endpoints
+      const auth = checkAuth();
+
+      // Handle Panel login POST
+      if (isPanelRoot && request.method === 'POST') {
+        const formData = await request.formData().catch(() => null);
+        const submitted = formData ? (formData.get('password') || formData.get('token') || '') : '';
+        if (submitted && submitted === targetToken) {
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': `/${panelPath}`,
+              'Set-Cookie': `wp_auth=${encodeURIComponent(targetToken)}; Path=/${panelPath}; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`
+            }
+          });
+        }
+        return new Response(renderLoginHtml(panelPath, true), {
+          status: 401,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' }
+        });
+      }
+
+      // Asset endpoints (under /${panelPath}/assets/...)
       if (
-        pathname === '/mavis-assets/app.css' ||
-        pathname === '/assets/app.css' ||
         pathname === `/${panelPath}/assets/app.css` ||
-        pathname === `/${panelPath}/app.css` ||
-        pathname === '/app.css'
+        pathname === `/${panelPath}/app.css`
       ) {
         return new Response(EMBEDDED_ASSETS.appCss, {
           headers: {
@@ -409,11 +485,8 @@ export default {
       }
 
       if (
-        pathname === '/mavis-assets/app.js' ||
-        pathname === '/assets/app.js' ||
         pathname === `/${panelPath}/assets/app.js` ||
-        pathname === `/${panelPath}/app.js` ||
-        pathname === '/app.js'
+        pathname === `/${panelPath}/app.js`
       ) {
         return new Response(EMBEDDED_ASSETS.appJs, {
           headers: {
@@ -424,9 +497,6 @@ export default {
       }
 
       if (
-        pathname === '/mavis-assets/logo.svg' ||
-        pathname === '/assets/logo.svg' ||
-        pathname === '/logo.svg' ||
         pathname === `/${panelPath}/assets/logo.svg` ||
         pathname === `/${panelPath}/logo.svg`
       ) {
@@ -438,8 +508,35 @@ export default {
         });
       }
 
+      // Panel HTML root GET
+      if (isPanelRoot) {
+        if (!auth.ok) {
+          return new Response(renderLoginHtml(panelPath, false), {
+            status: 200,
+            headers: { 'Content-Type': 'text/html; charset=utf-8' }
+          });
+        }
+
+        const headers = { 'Content-Type': 'text/html; charset=utf-8' };
+        if (auth.setCookie) {
+          headers['Set-Cookie'] = `wp_auth=${encodeURIComponent(targetToken)}; Path=/${panelPath}; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
+        }
+        return new Response(EMBEDDED_ASSETS.indexHtml, { headers });
+      }
+
+      // If accessing other endpoints without auth, return 404
+      if (!auth.ok) {
+        return new Response('Not Found', { status: 404 });
+      }
+
+      const uuid = (env.UUID || DEFAULT_UUID).trim();
+      const prefix = env.NODE_PREFIX || 'mavis-worker - ';
+      const cleanIps = env.CLEAN_IPS
+        ? env.CLEAN_IPS.split(',').map(s => s.trim()).filter(Boolean)
+        : DEFAULT_CLEAN_IPS;
+
       // Health endpoint (for app.js and status checks)
-      if (pathname === '/health' || pathname === `/${panelPath}/health`) {
+      if (pathname === `/${panelPath}/health`) {
         const nodes = buildNodes(host, uuid, prefix, cleanIps, '/mavis-ws');
         const healthData = {
           ok: true,
@@ -478,15 +575,9 @@ export default {
       if (
         pathname === `/${panelPath}/base64` ||
         pathname === `/${panelPath}/raw` ||
-        pathname === `/${panelPath}/sub` ||
-        pathname === '/sub' ||
-        pathname === '/base64'
+        pathname === `/${panelPath}/sub`
       ) {
-        if (!checkAuth()) {
-          return new Response('Unauthorized', { status: 401 });
-        }
-
-        const isBase64 = pathname.endsWith('/base64') || pathname.endsWith('/sub') || pathname === '/sub';
+        const isBase64 = pathname.endsWith('/base64') || pathname.endsWith('/sub');
         const nodes = buildNodes(host, uuid, prefix, cleanIps, '/mavis-ws');
         const text = nodes.map(n => n.uri).join('\n');
 
@@ -505,13 +596,8 @@ export default {
       // Subscription: Clash Meta (Mihomo)
       if (
         pathname === `/${panelPath}/clash` ||
-        pathname === `/${panelPath}/clash.yaml` ||
-        pathname === '/clash'
+        pathname === `/${panelPath}/clash.yaml`
       ) {
-        if (!checkAuth()) {
-          return new Response('Unauthorized', { status: 401 });
-        }
-
         const nodes = buildNodes(host, uuid, prefix, cleanIps, '/mavis-ws');
         const yaml = buildClashYaml(nodes);
         return new Response(yaml, {
@@ -527,13 +613,8 @@ export default {
       // Subscription: Sing-box client JSON
       if (
         pathname === `/${panelPath}/sb` ||
-        pathname === `/${panelPath}/sb/raw` ||
-        pathname === '/sb'
+        pathname === `/${panelPath}/sb/raw`
       ) {
-        if (!checkAuth()) {
-          return new Response('Unauthorized', { status: 401 });
-        }
-
         const nodes = buildNodes(host, uuid, prefix, cleanIps, '/mavis-ws');
         const jsonStr = buildSingBoxJson(nodes);
         return new Response(jsonStr, {
@@ -545,21 +626,9 @@ export default {
         });
       }
 
-      // Web Panel HTML
-      if (pathname === '/' || pathname === `/${panelPath}` || pathname === `/${panelPath}/`) {
-        if (!checkAuth()) {
-          return new Response('Unauthorized: Invalid or missing token.', { status: 401 });
-        }
-        return new Response(EMBEDDED_ASSETS.indexHtml, {
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8'
-          }
-        });
-      }
-
       return new Response('Not Found', { status: 404 });
     } catch (err) {
-      return new Response('Worker Error: ' + (err.stack || err.message), {
+      return new Response('Error: ' + (err.stack || err.message), {
         status: 500,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
       });

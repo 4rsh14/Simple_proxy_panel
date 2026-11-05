@@ -56,7 +56,7 @@ try {
   const obfuscated = JavaScriptObfuscator.obfuscate(workerSource, {
     compact: true,
     controlFlowFlattening: true,
-    controlFlowFlatteningThreshold: 0.5,
+    controlFlowFlatteningThreshold: 0.75,
     deadCodeInjection: false,
     debugProtection: false,
     disableConsoleOutput: false,
@@ -67,23 +67,23 @@ try {
     selfDefending: false,
     simplify: true,
     splitStrings: true,
-    splitStringsChunkLength: 10,
+    splitStringsChunkLength: 5,
     stringArray: true,
     stringArrayCallsTransform: true,
-    stringArrayCallsTransformThreshold: 0.5,
+    stringArrayCallsTransformThreshold: 0.75,
     stringArrayEncoding: ['base64'],
     stringArrayIndexShift: true,
     stringArrayRotate: true,
     stringArrayShuffle: true,
-    stringArrayWrappersCount: 2,
+    stringArrayWrappersCount: 3,
     stringArrayWrappersChainedCalls: true,
     stringArrayWrappersParametersMaxCount: 4,
     stringArrayWrappersType: 'function',
-    stringArrayThreshold: 0.8,
+    stringArrayThreshold: 1,
     target: 'browser',
     transformObjectKeys: true,
     unicodeEscapeSequence: false,
-    reservedNames: ['fetch', 'connect', 'cloudflare:sockets']
+    reservedNames: ['fetch', 'connect', 'cloudflare:sockets', 'default']
   }).getObfuscatedCode();
 
   fs.writeFileSync(DIST_WORKER_FILE, obfuscated, 'utf8');
